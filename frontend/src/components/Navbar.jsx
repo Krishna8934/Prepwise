@@ -1,12 +1,21 @@
-import React from 'react';
-import { Mic, Sparkles, Key, RotateCcw, Activity } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Mic, Sparkles, Key, RotateCcw, Activity, History } from 'lucide-react';
+import { getLocalHistory } from '../services/historyStorage';
 
 export default function Navbar({
   groqConnected,
   onOpenApiKeyModal,
+  onOpenHistoryModal,
   onResetInterview,
   currentStep
 }) {
+  const [historyCount, setHistoryCount] = useState(0);
+
+  useEffect(() => {
+    const list = getLocalHistory();
+    setHistoryCount(list.length);
+  }, [currentStep]);
+
   return (
     <header className="sticky top-0 z-40 w-full border-b border-slate-800/80 bg-slate-950/75 backdrop-blur-xl">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
@@ -36,6 +45,22 @@ export default function Navbar({
 
         {/* Status and Action Buttons */}
         <div className="flex items-center space-x-3">
+          
+          {/* History & Progress button */}
+          <button
+            onClick={onOpenHistoryModal}
+            className="flex items-center space-x-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-900 border border-slate-800 hover:border-brand-500/40 hover:bg-slate-800/70 text-slate-300 hover:text-white transition-all shadow-sm"
+            title="View Past Interview History & Improvement Trend"
+          >
+            <History className="w-3.5 h-3.5 text-brand-400" />
+            <span className="hidden sm:inline">History & Progress</span>
+            {historyCount > 0 && (
+              <span className="px-1.5 py-0.2 rounded-full text-[10px] font-bold bg-brand-500/30 text-brand-200 border border-brand-500/40">
+                {historyCount}
+              </span>
+            )}
+          </button>
+
           {/* Groq LLM Status indicator */}
           <button
             onClick={onOpenApiKeyModal}

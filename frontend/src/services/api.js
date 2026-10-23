@@ -45,9 +45,29 @@ export const createInterviewSession = async (payload) => {
   return res.data;
 };
 
-export const submitInterviewAnswer = async (sessionId, answerText, responseTime = null) => {
+export const getCompanyPlans = async () => {
+  try {
+    const res = await api.get('/api/interview/company-plans');
+    return res.data;
+  } catch (err) {
+    return null;
+  }
+};
+
+export const submitInterviewAnswer = async (sessionId, answerText, responseTime = null, isRetry = false, previousScore = null) => {
   const res = await api.post(`/api/interview/${sessionId}/answer`, {
     answer_text: answerText,
+    response_time_seconds: responseTime,
+    is_retry: isRetry,
+    previous_score: previousScore,
+  });
+  return res.data;
+};
+
+export const retryInterviewAnswer = async (sessionId, answerText, previousScore = null, responseTime = null) => {
+  const res = await api.post(`/api/interview/${sessionId}/retry-answer`, {
+    answer_text: answerText,
+    previous_score: previousScore,
     response_time_seconds: responseTime,
   });
   return res.data;
@@ -68,4 +88,19 @@ export const getInterviewReport = async (sessionId) => {
   return res.data;
 };
 
+export const getInterviewHistory = async () => {
+  try {
+    const res = await api.get('/api/interview/history');
+    return res.data;
+  } catch (err) {
+    return { history: [], last_score: null, current_score: null, improvement_trend: null, recurring_weak_topics: [] };
+  }
+};
+
+export const clearInterviewHistory = async () => {
+  const res = await api.post('/api/interview/history/clear');
+  return res.data;
+};
+
 export default api;
+

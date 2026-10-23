@@ -1,6 +1,7 @@
 import logging
 import datetime
-from typing import List, Dict, Any
+import re
+from typing import List, Dict, Any, Optional
 try:
     from backend.models.schemas import (
         CandidateProfile,
@@ -14,6 +15,8 @@ try:
         InterviewSessionState,
     )
     from backend.services.groq_service import groq_service
+    from backend.services.interview_engine import get_company_plan
+    from backend.api.session_store import save_report_to_history
 except ImportError:
     from models.schemas import (
         CandidateProfile,
@@ -27,16 +30,53 @@ except ImportError:
         InterviewSessionState,
     )
     from services.groq_service import groq_service
+    from services.interview_engine import get_company_plan
+    from api.session_store import save_report_to_history
 
 logger = logging.getLogger(__name__)
 
-ANSWER_EVALUATOR_PROMPT = """You are an expert technical interviewer and hiring manager assessing a candidate's answer during a mock interview.
+COMMON_FILLER_WORDS = [
+    "um", "uh", "ah", "er", "like", "basically", "you know", "actually",
+    "sort of", "kind of", "i mean", "honestly", "literally", "to be honest", "so yeah"
+]
+
+def detect_filler_words(text: str) -> List[str]:
+    """Detect presence of common filler words or verbal crutches."""
+    if not text:
+        return []
+    found = []
+    lower = text.lower()
+    for word in COMMON_FILLER_WORDS:
+        pattern = r"\b" + re.escape(word) + r"\b"
+        if re.search(pattern, lower):
+            found.append(word)
+    return found
+
+def generate_structure_template(question: QuestionItem) -> str:
+    """Generate question-specific STAR or 3-step structured answer model."""
+    is_behavioral = question.category in ["Behavioral", "HR", "Problem Solving", "Introduction"]
+    if is_behavioral:
+        return (
+            "Recommended STAR Framework:\n"
+            "1. Situation: Set the scene in 1 sentence ('In my college final year project...').\n"
+            "2. Task: State the primary goal or conflict you had to resolve.\n"
+            "3. Action: Detail your specific technical steps and decisions.\n"
+            "4. Result: Conclude with quantifiable impact ('reduced page load by 35%')."
+        )
+    return (
+        "Recommended Technical Architecture Framework:\n"
+        "1. Core Concept & Definition: Define the mechanism directly in 1 crisp sentence.\n"
+        "2. Architecture & Implementation: Explain data flow, components, and trade-offs.\n"
+        "3. Scalability & Edge Cases: Discuss failure modes, time/space complexity, or caching."
+    )
+
+ANSWER_EVALUATOR_PROMPT = """You are an expert technical interviewer, speech coach, and hiring manager assessing a candidate's answer during a mock interview.
 
 Evaluate the answer rigorously based on:
 1. Technical Accuracy (1-10): Correctness of facts, concepts, mechanisms, and algorithms.
 2. Relevance (1-10): Did the candidate directly answer what was asked without unnecessary rambling?
 3. Depth (1-10): Did they demonstrate surface-level knowledge or deep architectural/under-the-hood understanding?
-4. Communication (1-10): Structure, clarity, conciseness, and precision of terminology.
+4. Communication & Clarity (1-10): Structure, clarity, conciseness, verbal precision, lack of filler words or vagueness.
 5. Confidence (1-10): Assertiveness, clear reasoning, lack of hedging on basic facts.
 
 Decision Logic:
@@ -56,7 +96,9 @@ Return ONLY a JSON object:
   "strengths": ["Clear mention of time complexity", "Good architectural overview"],
   "improvements": ["Could explain cache invalidation trade-offs"],
   "decision": "follow_up" | "next_topic" | "increase_difficulty" | "decrease_difficulty",
-  "follow_up_reason": "Candidate mentioned Redis but did not explain eviction policies"
+  "follow_up_reason": "Candidate mentioned Redis but did not explain eviction policies",
+  "communication_feedback": "Speech analysis: Well paced and structured. Avoid verbal fillers like 'basically' to sound more authoritative.",
+  "better_answer_structure": "Recommended outline: 1. Core Principle -> 2. Implementation with Example -> 3. Edge-Case Trade-off"
 }
 """
 
@@ -105,9 +147,14 @@ def evaluate_answer(
     answer_text: str,
     profile: CandidateProfile,
     difficulty: str,
+    is_retry: bool = False,
+    previous_communication_score: Optional[int] = None
 ) -> AnswerEvaluation:
-    """Evaluate a single candidate answer."""
+    """Evaluate a single candidate answer with communication drill analysis."""
     cleaned_answer = (answer_text or "").strip()
+    detected_fillers = detect_filler_words(cleaned_answer)
+    default_structure = generate_structure_template(question)
+
     if not cleaned_answer or len(cleaned_answer) < 5:
         return AnswerEvaluation(
             technical_score=3,
@@ -118,11 +165,20 @@ def evaluate_answer(
             feedback="The response was very brief or contained minimal technical content. Try to provide more structured context, trade-offs, and examples.",
             strengths=["Attempted to acknowledge the question"],
             improvements=["Expand on your reasoning with concrete examples", "Address the core question directly"],
-            decision="next_topic"
+            decision="next_topic",
+            filler_words_detected=detected_fillers,
+            communication_feedback="Answer was too brief to evaluate communication effectively. Practice delivering at least 2-3 structured sentences.",
+            better_answer_structure=default_structure,
+            is_retry=is_retry,
+            previous_communication_score=previous_communication_score
         )
 
     if groq_service.is_configured():
         try:
+            retry_context = ""
+            if is_retry and previous_communication_score:
+                retry_context = f"\nNote: This is a RETRY attempt. The candidate previously scored {previous_communication_score}/10 on communication. Assess if their structure, clarity, and conciseness improved."
+
             user_prompt = f"""
 Candidate Profile:
 - Skills: {', '.join(profile.skills[:8])}
@@ -136,25 +192,50 @@ Question Details:
 
 Candidate's Spoken Answer:
 "{cleaned_answer}"
+{retry_context}
 
-Evaluate this answer now.
+Evaluate this answer and provide communication & filler word feedback now.
 """
             data = groq_service.call_json_llm(
                 system_prompt=ANSWER_EVALUATOR_PROMPT,
                 user_prompt=user_prompt,
                 temperature=0.3
             )
+            
+            comm_score = int(data.get("communication_score", 8))
+            # If fillers were detected, slightly penalize communication if LLM gave 10
+            if detected_fillers and comm_score > 8:
+                comm_score = 8
+
+            comm_improvement = None
+            if is_retry and previous_communication_score is not None:
+                comm_improvement = comm_score - previous_communication_score
+
+            # Construct communicative feedback
+            llm_comm_fb = data.get("communication_feedback", "")
+            if detected_fillers:
+                filler_str = ", ".join(f'"{f}"' for f in detected_fillers)
+                comm_feedback = f"Detected {len(detected_fillers)} filler word(s): {filler_str}. Practice pausing instead of using fillers to project executive presence. {llm_comm_fb}"
+            else:
+                comm_feedback = f"Clean verbal delivery with zero filler words! {llm_comm_fb}"
+
             return AnswerEvaluation(
                 technical_score=int(data.get("technical_score", 7)),
                 relevance_score=int(data.get("relevance_score", 8)),
                 depth_score=int(data.get("depth_score", 7)),
-                communication_score=int(data.get("communication_score", 8)),
+                communication_score=comm_score,
                 confidence_score=int(data.get("confidence_score", 8)),
                 feedback=data.get("feedback", "Good explanation with room to dive deeper into trade-offs."),
                 strengths=data.get("strengths", ["Addressed core prompt"]),
                 improvements=data.get("improvements", ["Could provide more technical depth"]),
                 decision=data.get("decision", "next_topic"),
-                follow_up_reason=data.get("follow_up_reason")
+                follow_up_reason=data.get("follow_up_reason"),
+                filler_words_detected=detected_fillers,
+                communication_feedback=comm_feedback,
+                better_answer_structure=data.get("better_answer_structure") or default_structure,
+                is_retry=is_retry,
+                previous_communication_score=previous_communication_score,
+                communication_improvement=comm_improvement
             )
         except Exception as e:
             logger.warning(f"Groq answer evaluation failed: {e}. Using fallback.")
@@ -162,22 +243,55 @@ Evaluate this answer now.
     # Fallback heuristic evaluation
     word_count = len(cleaned_answer.split())
     tech_score = min(9, max(5, 5 + (word_count // 30)))
+    
+    # Base communication score
+    base_comm = 8
+    if detected_fillers:
+        base_comm -= min(3, len(detected_fillers))
+    if word_count < 15:
+        base_comm -= 2
+    elif word_count > 120:
+        base_comm -= 1 # rambling
+    
+    # If this is a retry attempt, reward candidate for making a deliberate second attempt
+    if is_retry and previous_communication_score is not None:
+        base_comm = max(base_comm, min(10, previous_communication_score + (2 if not detected_fillers else 1)))
+
+    comm_score = max(4, min(10, base_comm))
+    comm_improvement = (comm_score - previous_communication_score) if (is_retry and previous_communication_score is not None) else None
+
+    if detected_fillers:
+        filler_str = ", ".join(f'"{f}"' for f in detected_fillers)
+        comm_fb = f"Noticeable filler words found: {filler_str}. Replace verbal pauses with silent breaths to elevate your answer clarity."
+    elif word_count < 20:
+        comm_fb = "Answer was somewhat terse. Try to elaborate on 'why' and 'how' using structured bullet points."
+    else:
+        comm_fb = "Articulate and fluent response with crisp sentence transitions."
+
     return AnswerEvaluation(
         technical_score=tech_score,
         relevance_score=8,
         depth_score=min(9, max(5, 4 + (word_count // 25))),
-        communication_score=8,
+        communication_score=comm_score,
         confidence_score=8,
         feedback="Solid answer demonstrating practical experience. Adding specific metrics or architectural trade-offs would further elevate your response.",
         strengths=["Clear communication", "Relevance to question topic"],
         improvements=["Detail concrete edge cases and design trade-offs"],
-        decision="next_topic"
+        decision="next_topic",
+        filler_words_detected=detected_fillers,
+        communication_feedback=comm_fb,
+        better_answer_structure=default_structure,
+        is_retry=is_retry,
+        previous_communication_score=previous_communication_score,
+        communication_improvement=comm_improvement
     )
 
 def generate_final_report(session: InterviewSessionState) -> InterviewReport:
     """Generate final comprehensive report from completed interview session."""
     turns = session.turns
     valid_turns = [t for t in turns if t.answer and t.evaluation]
+    target_company = session.target_company or "General"
+    company_plan = get_company_plan(target_company)
     
     question_reviews: List[QuestionReviewItem] = []
     for idx, turn in enumerate(turns, 1):
@@ -194,7 +308,10 @@ def generate_final_report(session: InterviewSessionState) -> InterviewReport:
                 score=avg_score,
                 feedback=eval_data.feedback,
                 strengths=eval_data.strengths,
-                improvements=eval_data.improvements
+                improvements=eval_data.improvements,
+                communication_score=eval_data.communication_score,
+                filler_words_detected=eval_data.filler_words_detected,
+                better_answer_structure=eval_data.better_answer_structure
             )
         )
 
@@ -207,6 +324,7 @@ def generate_final_report(session: InterviewSessionState) -> InterviewReport:
             
             user_prompt = f"""
 Candidate: {session.candidate_profile.name}
+Target Company: {target_company}
 Interview Type: {session.interview_type}
 Difficulty: {session.difficulty}
 Resume Summary: {session.candidate_profile.summary}
@@ -214,7 +332,7 @@ Resume Summary: {session.candidate_profile.summary}
 Full Interview Transcript & Internal Turn Evaluations:
 {transcript_text}
 
-Generate the final synthesis report JSON now.
+Generate the final synthesis report JSON now tailored to {target_company}'s hiring bar.
 """
             data = groq_service.call_json_llm(
                 system_prompt=FINAL_REPORT_PROMPT,
@@ -241,22 +359,26 @@ Generate the final synthesis report JSON now.
                 for r in data.get("recommended_topics", [])
             ]
             
-            return InterviewReport(
+            report = InterviewReport(
                 session_id=session.session_id,
                 candidate_name=session.candidate_profile.name or "Candidate",
+                target_company=target_company,
                 interview_type=session.interview_type,
                 difficulty=session.difficulty,
                 overall_score=int(data.get("overall_score", 82)),
-                readiness_verdict=data.get("readiness_verdict", "Strong Candidate — Recommended for Next Round"),
-                summary=data.get("summary", "Solid overall interview performance with clear communication."),
+                readiness_verdict=data.get("readiness_verdict", f"Strong {target_company} Candidate — Recommended for Next Round"),
+                summary=data.get("summary", f"Solid overall interview performance with clear communication tailored for {target_company}."),
                 category_scores=category_scores,
                 strengths=data.get("strengths", ["Strong project ownership", "Clear technical communication"]),
                 improvement_areas=data.get("improvement_areas", ["Deepen system design edge-case explanations"]),
                 recommended_topics=recommended_topics,
                 question_reviews=question_reviews,
                 total_questions_answered=len(valid_turns),
-                completed_at=datetime.datetime.now().strftime("%B %d, %Y - %I:%M %p")
+                completed_at=datetime.datetime.now().strftime("%B %d, %Y - %I:%M %p"),
+                company_prep_plan=company_plan
             )
+            save_report_to_history(report)
+            return report
         except Exception as e:
             logger.warning(f"Groq final report synthesis failed: {e}. Falling back to computation.")
 
@@ -280,40 +402,45 @@ Generate the final synthesis report JSON now.
         confidence=int(round(avg_conf)),
     )
 
-    verdict = "Ready for Technical Onsite" if overall >= 80 else ("Promising Candidate with Growth Areas" if overall >= 65 else "Needs More Practice")
+    verdict = f"Ready for {target_company} Onsite" if overall >= 80 else (f"Promising {target_company} Candidate with Growth Areas" if overall >= 65 else f"Needs More Practice for {target_company}")
 
-    return InterviewReport(
+    report = InterviewReport(
         session_id=session.session_id,
         candidate_name=session.candidate_profile.name or "Candidate",
+        target_company=target_company,
         interview_type=session.interview_type,
         difficulty=session.difficulty,
         overall_score=overall,
         readiness_verdict=verdict,
-        summary=f"The candidate demonstrated solid domain foundation across {session.interview_type} questions with good communicative structure.",
+        summary=f"The candidate demonstrated solid domain foundation across {target_company} {session.interview_type} rounds with consistent communicative structure.",
         category_scores=category_scores,
         strengths=[
-            "Direct and relevant responses with clear articulation",
+            f"Direct and relevant responses aligned with {target_company}'s engineering expectations",
             "Demonstrated practical familiarity with claimed resume technologies",
-            "Maintained consistent pacing and professional communication"
+            "Maintained consistent pacing and professional English communication"
         ],
         improvement_areas=[
             "Incorporate more quantitative metrics and performance benchmarks into explanations",
-            "Deepen coverage of trade-offs when comparing architectural alternatives",
-            "Proactively address error handling and system edge cases"
+            "Eliminate conversational filler words to project maximum confidence",
+            "Deepen coverage of trade-offs when comparing architectural alternatives"
         ],
         recommended_topics=[
             RecommendedTopic(
-                topic="System Architecture & Scalability Trade-offs",
-                reason="Answers focused heavily on happy paths with fewer mentions of failure modes.",
-                recommended_action="Practice explaining how your systems fail gracefully under extreme load or network partitions."
+                topic=f"{target_company} Core Technical Pattern",
+                reason="Focus on textbook definitions linked directly to resume project implementations.",
+                recommended_action=f"Review {target_company} syllabus: OOP, DBMS normalization, and system edge cases."
             ),
             RecommendedTopic(
-                topic="Database Query Optimization & Indexing",
-                reason="Discussing query plan execution and indexing strategies adds immediate senior-level depth.",
-                recommended_action="Review B-tree vs Hash indexing, join algorithms, and connection pooling."
+                topic="Concise STAR Delivery",
+                reason="Answers showed great substance but can be delivered even more crisply using STAR framework.",
+                recommended_action="Practice 90-second structured responses highlighting Situation, Task, Action, and Result."
             )
         ],
         question_reviews=question_reviews,
         total_questions_answered=len(valid_turns),
-        completed_at=datetime.datetime.now().strftime("%B %d, %Y - %I:%M %p")
+        completed_at=datetime.datetime.now().strftime("%B %d, %Y - %I:%M %p"),
+        company_prep_plan=company_plan
     )
+    save_report_to_history(report)
+    return report
+

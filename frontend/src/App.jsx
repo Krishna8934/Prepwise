@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import Navbar from './components/Navbar';
 import ApiKeyModal from './components/ApiKeyModal';
+import HistoryModal from './components/HistoryModal';
 import LandingPage from './pages/LandingPage';
 import ResumeUploadPage from './pages/ResumeUploadPage';
 import InterviewSetupPage from './pages/InterviewSetupPage';
@@ -13,6 +14,7 @@ export default function App() {
   const [currentStep, setCurrentStep] = useState('landing');
   const [groqConnected, setGroqConnected] = useState(false);
   const [isApiKeyModalOpen, setIsApiKeyModalOpen] = useState(false);
+  const [isHistoryModalOpen, setIsHistoryModalOpen] = useState(false);
 
   // Flow State
   const [candidateProfile, setCandidateProfile] = useState(null);
@@ -23,6 +25,7 @@ export default function App() {
     interview_type: 'Mixed',
     difficulty: 'Medium',
     total_questions: 10,
+    target_company: 'TCS',
   });
   const [completedSessionId, setCompletedSessionId] = useState(null);
   const [reportData, setReportData] = useState(null);
@@ -79,6 +82,7 @@ export default function App() {
       <Navbar
         groqConnected={groqConnected}
         onOpenApiKeyModal={() => setIsApiKeyModalOpen(true)}
+        onOpenHistoryModal={() => setIsHistoryModalOpen(true)}
         onResetInterview={handleResetInterview}
         currentStep={currentStep}
       />
@@ -86,7 +90,10 @@ export default function App() {
       {/* Main Flow Content */}
       <main className="flex-1">
         {currentStep === 'landing' && (
-          <LandingPage onStart={handleStartFromLanding} />
+          <LandingPage 
+            onStart={handleStartFromLanding} 
+            onOpenHistory={() => setIsHistoryModalOpen(true)}
+          />
         )}
 
         {currentStep === 'upload' && (
@@ -129,7 +136,7 @@ export default function App() {
       {/* Footer */}
       <footer className="w-full border-t border-slate-900 py-6 text-center text-xs text-slate-400">
         <p>
-          Prepwise — Practice smarter. Interview better. • Built with FastAPI, Groq LLMs & React.
+          Prepwise — Practice smarter. Interview better. • Company Placement Simulator & English Communication Drill.
         </p>
       </footer>
 
@@ -139,6 +146,12 @@ export default function App() {
         onClose={() => setIsApiKeyModalOpen(false)}
         onKeyUpdated={(status) => setGroqConnected(status)}
         currentStatus={groqConnected}
+      />
+
+      {/* History & Progress Modal */}
+      <HistoryModal
+        isOpen={isHistoryModalOpen}
+        onClose={() => setIsHistoryModalOpen(false)}
       />
 
     </div>

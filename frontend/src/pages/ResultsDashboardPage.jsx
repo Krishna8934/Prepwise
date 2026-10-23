@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import confetti from 'canvas-confetti';
 import { 
   Award, 
@@ -13,11 +13,20 @@ import {
   Target, 
   Layers, 
   MessageSquareQuote,
-  ChevronDown
+  ChevronDown,
+  Building2,
+  History,
+  ArrowRight,
+  MessageSquare
 } from 'lucide-react';
 import ScoreGauge from '../components/ScoreGauge';
+import HistoryModal from '../components/HistoryModal';
+import { saveReportLocally, getComparisonMetrics } from '../services/historyStorage';
 
 export default function ResultsDashboardPage({ report, onRestart }) {
+  const [progression, setProgression] = useState(null);
+  const [isHistoryModalOpen, setIsHistoryModalOpen] = useState(false);
+
   useEffect(() => {
     // Fire festive celebratory confetti
     try {
@@ -29,9 +38,17 @@ export default function ResultsDashboardPage({ report, onRestart }) {
     } catch (e) {
       // ignore
     }
-  }, []);
+
+    if (report) {
+      saveReportLocally(report);
+      const metrics = getComparisonMetrics(report.overall_score);
+      setProgression(metrics);
+    }
+  }, [report]);
 
   if (!report) return null;
+
+  const targetCompany = report.target_company || 'General';
 
   const categories = [
     { label: 'Technical Knowledge', score: report.category_scores?.technical_knowledge || 80, icon: Target },
@@ -49,15 +66,84 @@ export default function ResultsDashboardPage({ report, onRestart }) {
       <div className="text-center space-y-2">
         <div className="inline-flex items-center space-x-2 px-4 py-1.5 rounded-full bg-emerald-500/15 border border-emerald-500/30 text-emerald-300 text-xs font-bold mb-2">
           <Sparkles className="w-3.5 h-3.5 text-emerald-400" />
-          <span>Interview Complete 🎉</span>
+          <span>{targetCompany} Mock Interview Complete 🎉</span>
         </div>
         <h2 className="text-3xl sm:text-5xl font-extrabold text-white font-['Outfit'] tracking-tight">
           Performance Scorecard
         </h2>
         <p className="text-sm sm:text-base text-slate-400 max-w-xl mx-auto">
-          Comprehensive evaluation of your {report.interview_type} mock interview for <strong className="text-white">{report.candidate_name}</strong>.
+          Comprehensive evaluation of your {targetCompany} {report.interview_type} mock interview for <strong className="text-white">{report.candidate_name}</strong>.
         </p>
       </div>
+
+      {/* Feature 1: Progress & History Learning Progression Card */}
+      {progression && (
+        <div className="p-5 sm:p-6 rounded-3xl bg-gradient-to-r from-brand-950/60 via-indigo-950/40 to-slate-900 border border-brand-500/40 shadow-xl space-y-4">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+            <div>
+              <div className="flex items-center space-x-2 text-xs font-bold text-brand-300 uppercase tracking-wider mb-1">
+                <TrendingUp className="w-4 h-4 text-brand-400" />
+                <span>Interview History & Learning Progression</span>
+              </div>
+
+              {progression.hasPrevious ? (
+                <div className="flex flex-wrap items-center gap-3 mt-1">
+                  <span className="text-base text-slate-300 font-['Outfit']">
+                    Last score: <strong className="text-white font-mono text-lg">{progression.lastScore}</strong>
+                  </span>
+                  <ArrowRight className="w-4 h-4 text-brand-400" />
+                  <span className="text-base text-slate-300 font-['Outfit']">
+                    Current score: <strong className="text-white font-mono text-lg">{progression.currentScore}</strong>
+                  </span>
+                  {progression.diff !== null && (
+                    <span className={`px-3 py-1 rounded-full text-xs font-bold ${
+                      progression.diff > 0 
+                        ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' 
+                        : progression.diff === 0 
+                        ? 'bg-slate-800 text-slate-300 border border-slate-700' 
+                        : 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
+                    }`}>
+                      {progression.diff > 0 ? `+${progression.diff} pts 📈 Improvement` : `${progression.diff} pts`}
+                    </span>
+                  )}
+                </div>
+              ) : (
+                <div className="mt-1">
+                  <p className="text-sm font-semibold text-white">
+                    Initial Baseline Recorded: <span className="font-mono text-brand-300 font-bold">{report.overall_score}/100</span>
+                  </p>
+                  <p className="text-xs text-slate-400 mt-0.5">
+                    Your interview history is now actively tracking your improvement trend across mock sessions!
+                  </p>
+                </div>
+              )}
+            </div>
+
+            <button
+              onClick={() => setIsHistoryModalOpen(true)}
+              className="px-4 py-2 rounded-xl text-xs font-bold text-brand-300 bg-brand-500/20 border border-brand-500/30 hover:bg-brand-500/30 transition-all flex items-center space-x-1.5 shadow-md self-start sm:self-center"
+            >
+              <History className="w-4 h-4" />
+              <span>View Full History ({progression.totalCompleted})</span>
+            </button>
+          </div>
+
+          {/* Weak Topics Highlight */}
+          {progression.weakTopics && progression.weakTopics.length > 0 && (
+            <div className="pt-3 border-t border-slate-800/80 flex flex-wrap items-center gap-2 text-xs">
+              <span className="text-slate-400 font-semibold flex items-center space-x-1">
+                <AlertTriangle className="w-3.5 h-3.5 text-amber-400" />
+                <span>Weak Topics Requiring Attention:</span>
+              </span>
+              {progression.weakTopics.slice(0, 4).map((topic, idx) => (
+                <span key={idx} className="px-2.5 py-0.5 rounded-lg bg-slate-900 border border-amber-500/30 text-amber-200 text-[11px] font-medium">
+                  {topic}
+                </span>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Main Hero Card: Overall Score & Verdict */}
       <div className="p-6 sm:p-8 rounded-3xl glass-panel-glow border border-slate-800 shadow-2xl">
@@ -79,6 +165,10 @@ export default function ResultsDashboardPage({ report, onRestart }) {
           {/* Verdict and Summary */}
           <div className="md:col-span-8 space-y-4">
             <div className="flex flex-wrap items-center gap-2.5">
+              <span className="px-3 py-1 rounded-full text-xs font-bold bg-brand-500/20 text-brand-300 border border-brand-500/30 flex items-center space-x-1">
+                <Building2 className="w-3.5 h-3.5" />
+                <span>{targetCompany} Track</span>
+              </span>
               <span className="px-3 py-1 rounded-full text-xs font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
                 {report.readiness_verdict || 'Ready for Onsite'}
               </span>
@@ -185,7 +275,7 @@ export default function ResultsDashboardPage({ report, onRestart }) {
               <BookOpen className="w-4 h-4" />
             </div>
             <div>
-              <h3 className="text-lg font-bold text-white font-['Outfit']">Personalized Preparation Roadmap</h3>
+              <h3 className="text-lg font-bold text-white font-['Outfit']">{targetCompany} Preparation Roadmap</h3>
               <p className="text-xs text-slate-400">Targeted study topics based on weak or hesitant points observed during your interview.</p>
             </div>
           </div>
@@ -217,7 +307,7 @@ export default function ResultsDashboardPage({ report, onRestart }) {
           <div className="flex items-center justify-between">
             <div>
               <h3 className="text-lg font-bold text-white font-['Outfit']">Question-by-Question Review</h3>
-              <p className="text-xs text-slate-400">Inspect individual answers, scores, and granular AI feedback.</p>
+              <p className="text-xs text-slate-400">Inspect individual answers, communication clarity, and granular AI feedback.</p>
             </div>
           </div>
 
@@ -234,6 +324,11 @@ export default function ResultsDashboardPage({ report, onRestart }) {
                     </span>
                   </div>
                   <div className="flex items-center space-x-3 flex-shrink-0">
+                    {rev.communication_score && (
+                      <span className="text-[11px] font-semibold text-emerald-300 bg-emerald-500/10 px-2 py-0.5 rounded-md border border-emerald-500/20 hidden sm:inline">
+                        Comm: {rev.communication_score}/10
+                      </span>
+                    )}
                     <span className="text-xs font-bold text-brand-300 bg-brand-500/10 px-2.5 py-1 rounded-lg border border-brand-500/20">
                       {rev.score}/100
                     </span>
@@ -256,10 +351,26 @@ export default function ResultsDashboardPage({ report, onRestart }) {
                     </p>
                   </div>
 
+                  {rev.filler_words_detected && rev.filler_words_detected.length > 0 && (
+                    <div className="flex items-center space-x-2 p-2.5 rounded-xl bg-amber-500/10 border border-amber-500/20 text-amber-300">
+                      <span className="font-bold">Filler words detected:</span>
+                      <span className="text-slate-300">
+                        {rev.filler_words_detected.map(f => `"${f}"`).join(', ')}
+                      </span>
+                    </div>
+                  )}
+
                   <div className="p-3.5 rounded-xl bg-brand-500/10 border border-brand-500/20 text-slate-200">
                     <p className="font-bold text-brand-300 mb-0.5">AI Interviewer Evaluation:</p>
                     <p className="leading-relaxed">{rev.feedback}</p>
                   </div>
+
+                  {rev.better_answer_structure && (
+                    <div className="p-3 rounded-xl bg-slate-900 border border-slate-800 text-slate-300 whitespace-pre-line">
+                      <p className="font-bold text-brand-300 mb-1">Better Answer Structure:</p>
+                      {rev.better_answer_structure}
+                    </div>
+                  )}
                 </div>
               </details>
             ))}
@@ -285,6 +396,12 @@ export default function ResultsDashboardPage({ report, onRestart }) {
           <span>Practice Another Mock Interview</span>
         </button>
       </div>
+
+      {/* History Modal */}
+      <HistoryModal
+        isOpen={isHistoryModalOpen}
+        onClose={() => setIsHistoryModalOpen(false)}
+      />
 
     </div>
   );

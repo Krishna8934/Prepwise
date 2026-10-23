@@ -24,10 +24,15 @@ export default function QuestionCard({
 
       {/* Header Badges */}
       <div className="flex flex-wrap items-center justify-between gap-2.5 mb-4">
-        <div className="flex items-center space-x-2">
+        <div className="flex flex-wrap items-center gap-2">
           <span className="px-3 py-1 rounded-full text-xs font-bold bg-brand-500/20 text-brand-300 border border-brand-500/30">
             Question {currentIndex} of {totalQuestions}
           </span>
+          {question.round_name && (
+            <span className="px-2.5 py-1 rounded-full text-xs font-semibold bg-indigo-500/20 text-indigo-300 border border-indigo-500/30">
+              {question.round_name}
+            </span>
+          )}
           <span className="px-2.5 py-1 rounded-full text-xs font-medium bg-slate-800/80 text-slate-300 border border-slate-700/60">
             {question.category || 'Technical'}
           </span>
