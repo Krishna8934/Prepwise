@@ -15,7 +15,7 @@ import {
 } from 'lucide-react';
 import { getComparisonMetrics } from '../services/historyStorage';
 
-export default function LandingPage({ onStart, onOpenHistory }) {
+export default function LandingPage({ onStart, onOpenHistory, groqConnected, onOpenApiKeyModal }) {
   const [metrics, setMetrics] = useState(null);
 
   useEffect(() => {
@@ -71,7 +71,7 @@ export default function LandingPage({ onStart, onOpenHistory }) {
         )}
 
         {/* Primary CTA */}
-        <div className="flex flex-col sm:flex-row items-center justify-center gap-4 mb-16">
+        <div className="flex flex-col items-center justify-center gap-3 mb-16">
           <button
             onClick={onStart}
             className="w-full sm:w-auto px-8 py-4 rounded-2xl bg-gradient-to-r from-brand-600 via-indigo-600 to-purple-600 hover:from-brand-500 hover:to-purple-500 text-white font-bold text-base shadow-2xl shadow-brand-500/30 hover:scale-105 transition-all duration-200 flex items-center justify-center space-x-3 group"
@@ -80,7 +80,15 @@ export default function LandingPage({ onStart, onOpenHistory }) {
             <span>Start Company Mock Interview</span>
             <ArrowRight className="w-4 h-4 text-brand-200 group-hover:translate-x-1 transition-transform" />
           </button>
+
+          {!groqConnected && (
+            <div className="flex items-center justify-center space-x-2 text-xs text-amber-300/90 pt-1">
+              <span className="w-2 h-2 rounded-full bg-amber-400 animate-pulse" />
+              <span>Groq API Key Required. <button onClick={onOpenApiKeyModal} className="underline font-bold text-amber-200 hover:text-white">Enter key</button> for real Llama-3.3-70b interview generation.</span>
+            </div>
+          )}
         </div>
+
 
         {/* Mock Interface Preview Card */}
         <div className="relative max-w-3xl mx-auto rounded-3xl glass-panel-glow p-4 sm:p-6 border border-slate-800 shadow-2xl overflow-hidden mb-12 text-left">

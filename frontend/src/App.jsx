@@ -8,7 +8,7 @@ import InterviewSetupPage from './pages/InterviewSetupPage';
 import InterviewRoomPage from './pages/InterviewRoomPage';
 import ProcessingPage from './pages/ProcessingPage';
 import ResultsDashboardPage from './pages/ResultsDashboardPage';
-import { checkHealth } from './services/api';
+import { checkHealth, getStoredGroqKey, updateGroqKey } from './services/api';
 
 export default function App() {
   const [currentStep, setCurrentStep] = useState('landing');
@@ -32,13 +32,30 @@ export default function App() {
 
   useEffect(() => {
     const fetchStatus = async () => {
+      const storedKey = getStoredGroqKey();
+      if (storedKey) {
+        try {
+          const res = await updateGroqKey(storedKey);
+          if (res?.success) {
+            setGroqConnected(true);
+            return;
+          }
+        } catch (e) {
+          console.warn('Stored Groq key validation failed:', e);
+        }
+      }
       const health = await checkHealth();
       setGroqConnected(Boolean(health.groq_connected));
     };
     fetchStatus();
   }, []);
 
+
   const handleStartFromLanding = () => {
+    if (!groqConnected) {
+      setIsApiKeyModalOpen(true);
+      return;
+    }
     setCurrentStep('upload');
   };
 
@@ -93,11 +110,17 @@ export default function App() {
           <LandingPage 
             onStart={handleStartFromLanding} 
             onOpenHistory={() => setIsHistoryModalOpen(true)}
+            groqConnected={groqConnected}
+            onOpenApiKeyModal={() => setIsApiKeyModalOpen(true)}
           />
         )}
 
         {currentStep === 'upload' && (
-          <ResumeUploadPage onResumeParsed={handleResumeParsed} />
+          <ResumeUploadPage 
+            onResumeParsed={handleResumeParsed}
+            groqConnected={groqConnected}
+            onOpenApiKeyModal={() => setIsApiKeyModalOpen(true)}
+          />
         )}
 
         {currentStep === 'setup' && candidateProfile && (
@@ -106,8 +129,11 @@ export default function App() {
             rawResumeText={rawResumeText}
             onInterviewStarted={handleInterviewStarted}
             onBackToUpload={() => setCurrentStep('upload')}
+            groqConnected={groqConnected}
+            onOpenApiKeyModal={() => setIsApiKeyModalOpen(true)}
           />
         )}
+
 
         {currentStep === 'interview' && sessionData && initialQuestion && (
           <InterviewRoomPage

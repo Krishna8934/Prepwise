@@ -114,34 +114,82 @@ def get_company_plan(company_name: Optional[str]) -> Dict[str, Any]:
         return COMPANY_PREPARATION_PLANS["General"]
     return COMPANY_PREPARATION_PLANS.get(company_name, COMPANY_PREPARATION_PLANS["General"])
 
-INTERVIEWER_SYSTEM_PROMPT = """You are an elite, insightful AI interviewer conducting a real-time mock interview for Prepwise.
-Your goal is to conduct a natural, rigorous, and highly personalized interview.
+INTERVIEWER_SYSTEM_PROMPT = """You are a Principal Software Engineer and Bar-Raiser at a top technology company conducting a rigorous, real-time mock interview for Prepwise.
 
-Key Guidelines:
-1. ALWAYS base your questions on the candidate's actual resume (projects, tech stack, experience claims, education).
-2. Incorporate the selected Target Company pattern (e.g. TCS emphasizes OOP/DBMS/flexibility; Amazon emphasizes Leadership Principles & scale; Infosys emphasizes logic/pseudocode; Accenture emphasizes cloud/agile).
-3. Ask ONE focused question at a time.
-4. Keep the question phrasing natural, direct, and conversational (it will be spoken aloud via Text-to-Speech). Avoid markdown bullets or formatting in the question string.
-5. Adapt dynamically:
-   - If the candidate's last answer was shallow or made an interesting technical claim, ask a deep follow-up probing trade-offs, architecture, or edge cases.
-   - If the candidate answered thoroughly or already had follow-ups on the same topic, transition smoothly to a new skill/project/behavioral topic according to the company's round progression.
-   - For Technical interviews: Focus on system architecture, algorithms, coding concepts, data modeling, optimization, and project trade-offs.
-   - For HR interviews: Focus on behavioral STAR method questions, leadership, teamwork, handling conflicts, career trajectory.
-   - For Mixed interviews: Balance technical deep dives, core CS, and situational/behavioral questions.
-6. Challenge exaggerated claims respectfully.
-7. Match the requested difficulty (Easy / Medium / Hard).
+Your mission is to conduct a genuine, deeply personalized, and intellectually challenging interview.
 
-Return ONLY a JSON object:
+CRITICAL RULES:
+1. DEEPLY RESUME-CENTERED:
+   - Every question must be anchored in the candidate's actual projects, claimed tech stack, stated achievements, or work experience.
+   - Specifically reference the candidate's project titles, technologies they chose, and architectural mechanisms they claim to have implemented.
+   - Respectfully verify and challenge claims: if they claim "handled 5k req/s" or "used Redis locks", ask them *how* they handled race conditions, cache invalidation, or network partitions.
+2. NO REPETITION & PROGRESSIVE DEPTH:
+   - Track all previously asked questions and topics. Never ask the same question or touch the same sub-topic twice.
+   - Rotate across different projects, frameworks, system design scenarios, and behavioral challenges as the interview progresses.
+3. ADAPTIVE REAL-TIME DIALOGUE:
+   - If the candidate's previous answer was shallow, vague, or made an unverified claim, ask a sharp follow-up probing trade-offs, failure modes, or under-the-hood mechanics.
+   - If the candidate demonstrated mastery or this is a new round, transition smoothly to a different project or technical domain.
+4. COMPANY-SPECIFIC FOCUS:
+   - TCS: Emphasize core Object-Oriented principles, database normalization & SQL query efficiency, modular code organization, and adaptability.
+   - Amazon: Emphasize high-scale distributed architecture, caching/sharding trade-offs, failure recovery, and Amazon Leadership Principles (Customer Obsession, Ownership, Bias for Action via STAR method).
+   - Infosys: Emphasize algorithmic logic, data structures, database normalization (1NF-3NF), clean pseudocode walkthrough, and learning agility.
+   - Accenture: Emphasize cloud services (AWS/Azure), REST API design, CI/CD, microservices, and end-user business impact.
+   - Startup: Emphasize production triage, speed vs technical debt trade-offs, fullstack problem solving, and ambiguity.
+   - General: Holistic evaluation across system design, API contracts, data models, and edge cases.
+5. NATURAL SPOKEN PHRASING:
+   - The question will be spoken aloud to the candidate via Text-to-Speech (TTS).
+   - Keep the question phrasing natural, direct, conversational, and articulate.
+   - Do NOT output markdown bullets, bold asterisks (**), or headers in the question string.
+
+Return ONLY a valid JSON object matching this schema:
 {
-  "question": "The spoken interview question",
-  "category": "Technical" | "System Design" | "Project Deep Dive" | "Behavioral" | "Problem Solving" | "Aptitude / Logic",
-  "topic": "Short name of the specific topic being tested",
+  "question": "The conversational spoken interview question",
+  "category": "Project Deep Dive" | "Technical" | "System Design" | "Problem Solving" | "Behavioral",
+  "topic": "Short title of the specific technical topic being tested",
   "is_follow_up": true | false,
   "difficulty": "Easy" | "Medium" | "Hard",
-  "target_skill_or_project": "The specific item from their resume being targeted",
-  "context_hint": "Brief internal rationale for why this question was chosen",
-  "round_name": "e.g. Round 1: Core CS or Round 2: Project Discussion"
+  "target_skill_or_project": "The exact project name, framework, or skill from the resume being probed",
+  "context_hint": "Brief rationale for why this question is being asked",
+  "round_name": "e.g. Round 1: Core Architecture or Round 2: Project Deep-Dive"
 }
+"""
+
+def _format_candidate_profile_for_prompt(profile: CandidateProfile) -> str:
+    """Format full candidate profile with high detail for LLM context."""
+    projects_text = []
+    for idx, p in enumerate(profile.projects, 1):
+        achievements_str = "; ".join(p.key_achievements) if p.key_achievements else "No specific metrics listed"
+        projects_text.append(
+            f"Project {idx}: '{p.title}'\n"
+            f"  - Tech Stack: {', '.join(p.tech_stack) if p.tech_stack else 'Not specified'}\n"
+            f"  - Summary: {p.description or 'Hands-on application'}\n"
+            f"  - Key Claims/Achievements: {achievements_str}"
+        )
+
+    work_text = []
+    for idx, w in enumerate(profile.work_experience, 1):
+        highlights_str = "; ".join(w.highlights) if w.highlights else "Engineering responsibilities"
+        work_text.append(
+            f"Experience {idx}: {w.company} as {w.role} ({w.duration or 'Recent'})\n"
+            f"  - Highlights: {highlights_str}"
+        )
+
+    return f"""
+Candidate Name: {profile.name}
+Summary: {profile.summary}
+Programming Languages: {', '.join(profile.programming_languages) if profile.programming_languages else 'General'}
+Frameworks: {', '.join(profile.frameworks) if profile.frameworks else 'Modern frameworks'}
+Technical Skills & Tools: {', '.join(profile.skills) if profile.skills else 'Fullstack engineering'}
+Expertise Domains: {', '.join(profile.expertise_areas) if profile.expertise_areas else 'Software Engineering'}
+
+Extracted Resume Projects:
+{chr(10).join(projects_text) if projects_text else 'None extracted'}
+
+Extracted Work Experience:
+{chr(10).join(work_text) if work_text else 'None extracted'}
+
+Key Probing Topics from Resume:
+{chr(10).join(['- ' + t for t in profile.suggested_topics]) if profile.suggested_topics else '- Architecture and trade-offs'}
 """
 
 def generate_first_question(
@@ -150,297 +198,173 @@ def generate_first_question(
     difficulty: str,
     target_company: str = "General",
 ) -> QuestionItem:
-    """Generate the opening interview question tailored to the candidate and target company."""
-    company_plan = get_company_plan(target_company)
-    
-    if groq_service.is_configured():
-        try:
-            profile_summary = f"""
-Candidate Name: {profile.name}
-Summary: {profile.summary}
-Skills: {', '.join(profile.skills[:10])}
-Languages: {', '.join(profile.programming_languages)}
-Frameworks: {', '.join(profile.frameworks)}
-Projects: {[p.title + ': ' + p.description for p in profile.projects[:3]]}
-Work Experience: {[w.company + ' as ' + w.role for w in profile.work_experience[:2]]}
-Suggested Topics: {profile.suggested_topics[:4]}
-"""
-            user_prompt = f"""
-Start the interview.
-Target Company: {target_company}
-Company Preparation Pattern: {company_plan.get('tagline')} - {company_plan.get('overview')}
-Company Focus Areas: {company_plan.get('key_focus_areas')}
-Interview Type: {interview_type}
-Difficulty: {difficulty}
+    """Generate the opening interview question strictly tailored to the candidate's resume and target company."""
+    if not groq_service.is_configured():
+        raise ValueError(
+            "Groq API key is not configured. An active Groq API key is required to start an interview with Prepwise. "
+            "Please provide your Groq API key in the settings modal."
+        )
 
-Candidate Profile:
+    company_plan = get_company_plan(target_company)
+    rounds = company_plan.get("rounds", [{}])
+    first_round_name = rounds[0].get("name", "Round 1: Screening & Architecture")
+    profile_summary = _format_candidate_profile_for_prompt(profile)
+
+    user_prompt = f"""
+TARGET COMPANY: {target_company}
+HIRING TRACK: {company_plan.get('tagline')}
+COMPANY OVERVIEW: {company_plan.get('overview')}
+KEY FOCUS AREAS: {company_plan.get('key_focus_areas')}
+INTERVIEW TYPE: {interview_type}
+DIFFICULTY: {difficulty}
+
+FULL CANDIDATE RESUME PROFILE:
 {profile_summary}
 
-Generate the opening question (Question 1) matching the {target_company} interview style:
-- If TCS: Begin with a polite greeting and explore how their resume project incorporates Core OOP concepts or database design.
-- If Amazon: Begin with a warm greeting and ask a project question that tests ownership and technical decision-making (Customer Obsession/Ownership).
-- If Infosys: Begin with an introductory project walk-through focusing on algorithmic logic or core programming concepts.
-- If Accenture: Begin with their project architecture and how it solves real-world user or client needs.
-- If Startup: Begin with the biggest technical problem they had to solve quickly with minimal guidance.
-- If General: Warm-up regarding top project architecture.
+TASK:
+Generate Question 1 (Opening Question) for this candidate's {target_company} interview.
+
+MANDATORY INSTRUCTIONS:
+1. Greet the candidate warmly by their first name ({profile.name.split()[0] if profile.name else 'Candidate'}).
+2. Specifically introduce the interview for {target_company}.
+3. Anchor Question 1 in their primary resume project (Project 1).
+4. Explicitly state the exact name of their project and mention technologies they used in it.
+5. Ask them to explain the high-level architecture of that project, and drill into how they handled a specific technical challenge or design decision related to {target_company}'s engineering focus.
+6. Make sure the phrasing sounds natural when spoken aloud. Do NOT include markdown formatting.
 """
-            data = groq_service.call_json_llm(
-                system_prompt=INTERVIEWER_SYSTEM_PROMPT,
-                user_prompt=user_prompt,
-                temperature=0.4
-            )
-            return QuestionItem(
-                id=1,
-                question=data.get("question", f"Hello {profile.name.split()[0] if profile.name else 'there'}, welcome to your {target_company} mock interview with Prepwise. To start off, could you briefly introduce yourself and walk me through your most impactful project?"),
-                category=data.get("category", "Introduction"),
-                topic=data.get("topic", "Candidate Background"),
-                difficulty=difficulty,
-                is_follow_up=False,
-                target_skill_or_project=data.get("target_skill_or_project", "Overview"),
-                context_hint=data.get("context_hint", f"Opening {target_company} interview question"),
-                round_name=data.get("round_name", company_plan.get("rounds", [{}])[0].get("name", "Round 1: Screening"))
-            )
-        except Exception as e:
-            logger.warning(f"Groq first question generation failed: {e}. Using fallback.")
 
-    # Intelligent deterministic fallback
-    first_name = profile.name.split()[0] if profile.name and profile.name != "Candidate" else "there"
-    top_project = profile.projects[0].title if profile.projects else "your recent technical work"
-    top_lang = profile.programming_languages[0] if profile.programming_languages else "software development"
-    
-    if target_company == "TCS":
-        q_text = f"Hello {first_name}, welcome to your TCS placement interview with Prepwise. To begin, could you introduce yourself and explain how you applied Object-Oriented principles like inheritance and encapsulation in '{top_project}'?"
-        cat = "Project Deep Dive"
-        top = "OOP in Project"
-    elif target_company == "Amazon":
-        q_text = f"Hello {first_name}, welcome to your Amazon SDE mock interview. Let's start with ownership: walk me through '{top_project}'. What was your specific architectural contribution, and what trade-offs did you make to ensure scalability?"
-        cat = "Project Deep Dive"
-        top = "Ownership & Architecture"
-    elif target_company == "Infosys":
-        q_text = f"Hello {first_name}, welcome to your Infosys technical interview. Looking at your resume, you built '{top_project}' with {top_lang}. Could you walk me through the primary data structures and database schema you designed for it?"
-        cat = "Technical"
-        top = "Data Structures & DB"
-    elif target_company == "Accenture":
-        q_text = f"Hello {first_name}, welcome to your Accenture mock interview. In your project '{top_project}', what modern web architecture or APIs did you use, and how did you ensure a seamless experience for end users?"
-        cat = "Technical"
-        top = "API & Architecture"
-    elif target_company == "Startup":
-        q_text = f"Hey {first_name}, welcome to Prepwise. In a fast-moving startup environment, shipping high quality code fast is key. In '{top_project}', what was the hardest bug or bottleneck you had to debug, and how did you resolve it?"
-        cat = "Problem Solving"
-        top = "Rapid Debugging"
-    elif interview_type == "HR":
-        q_text = f"Hello {first_name}, welcome to your interview with Prepwise. To begin, could you walk me through your background, what drove your interest in technology, and what you're looking for in your next role?"
-        cat = "Behavioral"
-        top = "Background & Motivations"
-    elif interview_type == "Technical":
-        q_text = f"Hello {first_name}, welcome to your technical interview. Looking at your resume, I see you built '{top_project}'. Could you walk me through the overall architecture of that project and explain why you chose {top_lang} for the implementation?"
-        cat = "Project Deep Dive"
-        top = top_project
-    else:
-        q_text = f"Hello {first_name}, welcome to Prepwise. Let's start with an overview: could you walk me through '{top_project}' and explain the biggest technical challenge you faced while building it?"
-        cat = "Project Deep Dive"
-        top = top_project
-
-    return QuestionItem(
-        id=1,
-        question=q_text,
-        category=cat,
-        topic=top,
-        difficulty=difficulty,
-        is_follow_up=False,
-        target_skill_or_project=top_project,
-        context_hint=f"{target_company} interview opening baseline",
-        round_name=company_plan.get("rounds", [{}])[0].get("name", "Round 1")
-    )
+    try:
+        data = groq_service.call_json_llm(
+            system_prompt=INTERVIEWER_SYSTEM_PROMPT,
+            user_prompt=user_prompt,
+            temperature=0.3,
+            max_tokens=1500
+        )
+        return QuestionItem(
+            id=1,
+            question=data.get("question", f"Hello {profile.name.split()[0] if profile.name else 'there'}, welcome to your {target_company} interview. Could you walk me through your primary project from your resume and explain the architectural decisions you made?"),
+            category=data.get("category", "Project Deep Dive"),
+            topic=data.get("topic", "Project Architecture"),
+            difficulty=difficulty,
+            is_follow_up=False,
+            target_skill_or_project=data.get("target_skill_or_project", profile.projects[0].title if profile.projects else "Resume Project"),
+            context_hint=data.get("context_hint", f"Opening {target_company} interview question grounded in resume"),
+            round_name=data.get("round_name", first_round_name)
+        )
+    except Exception as e:
+        logger.error(f"Groq first question generation failed: {e}")
+        raise RuntimeError(f"Failed to generate opening question with Groq: {str(e)}. Please check your Groq API key and network connection.")
 
 def generate_next_question(
     session: InterviewSessionState,
     latest_evaluation: Optional[AnswerEvaluation] = None,
 ) -> QuestionItem:
-    """Generate the next adaptive question based on past turns, evaluation, and company rounds."""
+    """Generate the next adaptive question based on candidate resume, past turns, and evaluation."""
+    if not groq_service.is_configured():
+        raise ValueError(
+            "Groq API key is not configured. An active Groq API key is required to generate interview questions. "
+            "Please provide your Groq API key in the settings modal."
+        )
+
     next_id = session.current_question_index + 1
     target_company = session.target_company or "General"
     company_plan = get_company_plan(target_company)
     rounds = company_plan.get("rounds", [])
-    
+
     # Determine current round based on progress
     total_q = max(session.total_questions, 1)
     if next_id <= max(1, total_q // 3):
-        current_round = rounds[0] if len(rounds) > 0 else {"name": "Round 1: Screening"}
+        current_round = rounds[0] if len(rounds) > 0 else {"name": "Round 1: Screening & Core Concepts"}
     elif next_id <= max(2, (2 * total_q) // 3):
-        current_round = rounds[1] if len(rounds) > 1 else (rounds[0] if rounds else {"name": "Round 2: Technical"})
+        current_round = rounds[1] if len(rounds) > 1 else (rounds[0] if rounds else {"name": "Round 2: Technical Deep Dive"})
     else:
-        current_round = rounds[2] if len(rounds) > 2 else (rounds[-1] if rounds else {"name": "Round 3: Behavioral"})
+        current_round = rounds[2] if len(rounds) > 2 else (rounds[-1] if rounds else {"name": "Round 3: Behavioral & System Design"})
 
-    if groq_service.is_configured():
-        try:
-            # Build conversation history
-            history_lines = []
-            for idx, turn in enumerate(session.turns, 1):
-                ans = turn.answer or "[No answer]"
-                eval_str = f"(Score: Tech={turn.evaluation.technical_score if turn.evaluation else 'N/A'}/10, Comm={turn.evaluation.communication_score if turn.evaluation else 'N/A'}/10)" if turn.evaluation else ""
-                history_lines.append(f"Q{idx} ({turn.question.category} - {turn.question.topic}): {turn.question.question}")
-                history_lines.append(f"A{idx}: {ans} {eval_str}")
-            
-            history_text = "\n".join(history_lines)
-            
-            # Check consecutive follow-ups
-            recent_follow_ups = 0
-            for turn in reversed(session.turns):
-                if turn.question.is_follow_up:
-                    recent_follow_ups += 1
-                else:
-                    break
+    # Build full conversation history
+    history_lines = []
+    already_asked_topics = []
+    for idx, turn in enumerate(session.turns, 1):
+        ans = turn.answer or "[No answer]"
+        eval_info = ""
+        if turn.evaluation:
+            eval_info = f"[Scores: Tech={turn.evaluation.technical_score}/10, Depth={turn.evaluation.depth_score}/10, Comm={turn.evaluation.communication_score}/10 | Feedback: {turn.evaluation.feedback}]"
+        history_lines.append(f"Turn {idx}:\n  Question ({turn.question.category} - {turn.question.topic}): {turn.question.question}\n  Candidate Answer: {ans}\n  Internal Evaluation: {eval_info}")
+        if turn.question.topic:
+            already_asked_topics.append(turn.question.topic)
 
-            user_prompt = f"""
-Candidate Name: {session.candidate_profile.name}
-Target Company: {target_company}
-Company Pattern: {company_plan.get('tagline')}
-Current Target Round: {current_round.get('name')} (Focus: {', '.join(current_round.get('topics', []))})
-Resume Skills: {', '.join(session.candidate_profile.skills[:10])}
-Resume Frameworks: {', '.join(session.candidate_profile.frameworks)}
-Resume Projects: {[p.title + ' (' + ', '.join(p.tech_stack) + ')' for p in session.candidate_profile.projects[:3]]}
-Suggested Resume Topics: {session.candidate_profile.suggested_topics}
+    history_text = "\n\n".join(history_lines)
 
-Interview Settings:
-- Type: {session.interview_type}
-- Configured Difficulty: {session.difficulty}
-- Current Question Number: {next_id} of {session.total_questions}
-- Consecutive follow-ups on current topic: {recent_follow_ups}
+    # Calculate consecutive follow-ups
+    recent_follow_ups = 0
+    for turn in reversed(session.turns):
+        if turn.question.is_follow_up:
+            recent_follow_ups += 1
+        else:
+            break
 
-Conversation History so far:
+    profile_summary = _format_candidate_profile_for_prompt(session.candidate_profile)
+
+    user_prompt = f"""
+TARGET COMPANY: {target_company} ({company_plan.get('tagline')})
+ROUND: {current_round.get('name')} (Target Topics: {', '.join(current_round.get('topics', []))})
+INTERVIEW TYPE: {session.interview_type}
+CONFIGURED DIFFICULTY: {session.difficulty}
+CURRENT QUESTION NUMBER: {next_id} of {session.total_questions}
+CONSECUTIVE FOLLOW-UPS ON PREVIOUS TOPIC: {recent_follow_ups}
+
+TOPICS ALREADY ASKED (DO NOT REPEAT):
+{', '.join(set(already_asked_topics))}
+
+CANDIDATE RESUME PROFILE:
+{profile_summary}
+
+CONVERSATION TRANSCRIPT & EVALUATIONS SO FAR:
 {history_text}
 
-Latest Evaluation of Candidate's Answer:
-- Decision recommendation: {latest_evaluation.decision if latest_evaluation else 'next_topic'}
-- Feedback: {latest_evaluation.feedback if latest_evaluation else 'N/A'}
-- Technical Score: {latest_evaluation.technical_score if latest_evaluation else 'N/A'}/10
-- Depth Score: {latest_evaluation.depth_score if latest_evaluation else 'N/A'}/10
-- Communication Score: {latest_evaluation.communication_score if latest_evaluation else 'N/A'}/10
+LATEST TURN EVALUATION:
+- Recommendation: {latest_evaluation.decision if latest_evaluation else 'next_topic'}
+- Candidate Answer Strengths: {latest_evaluation.strengths if latest_evaluation else 'N/A'}
+- Candidate Missing Improvements: {latest_evaluation.improvements if latest_evaluation else 'N/A'}
+- Follow-up Reason (if applicable): {latest_evaluation.follow_up_reason if latest_evaluation else 'N/A'}
 
-Instruction:
-Generate Question #{next_id}.
-- Match the {target_company} interview rounds (e.g. for TCS probe core CS/OOP/DBMS or project roles; for Amazon probe Leadership Principles with STAR context or high-scale system design; for Infosys probe logic/normalization).
-- If consecutive follow-ups >= 2 OR decision is 'next_topic', you MUST transition to a different skill/project/topic from their resume or the company round focus.
-- If decision is 'follow_up' and consecutive follow-ups < 2, ask a sharp, probing follow-up targeting specific nuances or edge cases of their previous answer.
-- Ensure the question is direct, professional, conversational, and clear.
+QUESTION GENERATION INSTRUCTIONS:
+1. DECISION LOGIC:
+   - If (latest_evaluation.decision == 'follow_up' OR latest_evaluation.technical_score < 7) AND consecutive follow-ups < 2:
+     Ask a SHARP, probing follow-up targeting the specific missing trade-off, edge case, or claim they just mentioned. Reference what they said directly.
+   - Otherwise (consecutive follow-ups >= 2 OR decision == 'next_topic'):
+     Transition cleanly to a DIFFERENT project, a different framework, or a company-specific round topic from their resume.
+     For example:
+     - If Project 1 was explored, question them on Project 2 or a work experience bullet point.
+     - Question them on the internal mechanics of a framework they explicitly listed (e.g. {session.candidate_profile.frameworks[0] if session.candidate_profile.frameworks else 'their tech stack'}).
+     - If in late rounds, present a realistic system design, debugging scenario, or behavioral STAR question tailored to {target_company}.
+
+2. CRITICAL CONSTRAINT:
+   - The question MUST be grounded in the candidate's actual resume items.
+   - Do NOT ask generic textbook questions without tying them to their projects or technical background.
+   - Keep the question conversational, professional, and clear for voice synthesis (no markdown formatting).
 """
-            data = groq_service.call_json_llm(
-                system_prompt=INTERVIEWER_SYSTEM_PROMPT,
-                user_prompt=user_prompt,
-                temperature=0.4
-            )
-            return QuestionItem(
-                id=next_id,
-                question=data.get("question", f"Could you elaborate on how you handle scalability, database indexing, and error handling in your projects?"),
-                category=data.get("category", "Technical"),
-                topic=data.get("topic", current_round.get("topics", ["System Architecture"])[0]),
-                difficulty=data.get("difficulty", session.difficulty),
-                is_follow_up=data.get("is_follow_up", False),
-                follow_up_to_id=session.turns[-1].question.id if data.get("is_follow_up") and session.turns else None,
-                target_skill_or_project=data.get("target_skill_or_project", ""),
-                context_hint=data.get("context_hint", f"Adaptive {target_company} question"),
-                round_name=data.get("round_name", current_round.get("name", "Interview Round"))
-            )
-        except Exception as e:
-            logger.warning(f"Groq next question generation failed: {e}. Using fallback.")
 
-    # Deterministic fallback engine
-    return _heuristic_next_question(session, next_id, latest_evaluation, current_round)
-
-def _heuristic_next_question(
-    session: InterviewSessionState,
-    next_id: int,
-    latest_evaluation: Optional[AnswerEvaluation],
-    current_round: Optional[Dict[str, Any]] = None
-) -> QuestionItem:
-    """Fallback question generation with company-specific tracks and progressive difficulty."""
-    p = session.candidate_profile
-    turns_count = len(session.turns)
-    target_company = session.target_company or "General"
-    round_label = current_round.get("name", "Technical Round") if current_round else "Technical Round"
-    
-    # Check if we should ask follow up
-    last_turn = session.turns[-1] if session.turns else None
-    if last_turn and not last_turn.question.is_follow_up and latest_evaluation and latest_evaluation.technical_score < 7:
+    try:
+        data = groq_service.call_json_llm(
+            system_prompt=INTERVIEWER_SYSTEM_PROMPT,
+            user_prompt=user_prompt,
+            temperature=0.3,
+            max_tokens=1500
+        )
         return QuestionItem(
             id=next_id,
-            question=f"Building on your last point about {last_turn.question.topic}, what specific trade-offs did you encounter, and how would you optimize the performance if traffic grew tenfold?",
-            category=last_turn.question.category,
-            topic=last_turn.question.topic,
-            difficulty=session.difficulty,
-            is_follow_up=True,
-            follow_up_to_id=last_turn.question.id,
-            target_skill_or_project=last_turn.question.target_skill_or_project,
-            context_hint="Follow-up probing performance trade-offs",
-            round_name=round_label
+            question=data.get("question", "Could you elaborate on how you designed the data flow and handled potential concurrency bottlenecks in your projects?"),
+            category=data.get("category", "Technical"),
+            topic=data.get("topic", current_round.get("topics", ["System Architecture"])[0]),
+            difficulty=data.get("difficulty", session.difficulty),
+            is_follow_up=data.get("is_follow_up", False),
+            follow_up_to_id=session.turns[-1].question.id if data.get("is_follow_up") and session.turns else None,
+            target_skill_or_project=data.get("target_skill_or_project", ""),
+            context_hint=data.get("context_hint", f"Adaptive question tailored to resume and {target_company}"),
+            round_name=data.get("round_name", current_round.get("name", "Interview Round"))
         )
+    except Exception as e:
+        logger.error(f"Groq next question generation failed: {e}")
+        raise RuntimeError(f"Failed to generate question #{next_id} with Groq: {str(e)}. Please check your Groq API key and network connection.")
 
-    # Company specific tailored question banks
-    if target_company == "TCS":
-        tcs_bank = [
-            ("In Object-Oriented Programming, can you explain the core difference between Abstract Classes and Interfaces, and give an example of where you would use each?", "Technical", "OOP Concepts"),
-            ("In database management systems, what is the difference between an INNER JOIN, LEFT JOIN, and FULL OUTER JOIN, and why is indexing important on foreign keys?", "Technical", "DBMS & SQL"),
-            (f"In your project '{p.projects[0].title if p.projects else 'software application'}', how did you organize your code into modular layers or packages?", "Project Deep Dive", "Project Architecture"),
-            ("At TCS, project requirements can evolve rapidly, and engineers often collaborate across different global locations. Tell me about a time you had to adapt quickly to an unexpected technical change.", "Behavioral", "Adaptability & Flexibility"),
-            ("Can you explain how memory management and garbage collection work in modern languages, and what causes a memory leak?", "Technical", "Memory & Performance")
-        ]
-        q_text, cat, top = tcs_bank[turns_count % len(tcs_bank)]
-    elif target_company == "Amazon":
-        amazon_bank = [
-            ("Amazon Leadership Principle - Customer Obsession: Tell me about a time when you had to make a tough technical compromise to ensure the end customer experienced zero downtime or degradation.", "Behavioral", "Customer Obsession"),
-            ("How would you design a distributed cache like Redis or Memcached? Specifically, what cache eviction strategies (LRU, LFU) and consistent hashing mechanisms would you use?", "System Design", "Distributed Caching"),
-            ("Amazon Leadership Principle - Ownership: Describe a time when you saw a problem in a codebase or project that was outside your direct responsibility, but you stepped up and fixed it anyway.", "Behavioral", "Ownership"),
-            ("What is the time and space complexity of searching, inserting, and deleting in an AVL tree versus a Hash Map, and how do you handle hash bucket collisions under high load?", "Technical", "Algorithms & Data Structures"),
-            ("Amazon Leadership Principle - Bias for Action: Tell me about a time you had to make an important engineering decision with incomplete data. How did you assess the risks and what was the outcome?", "Behavioral", "Bias for Action")
-        ]
-        q_text, cat, top = amazon_bank[turns_count % len(amazon_bank)]
-    elif target_company == "Infosys":
-        infosys_bank = [
-            ("Can you walk me through the steps to normalize an unnormalized database schema into 1NF, 2NF, and 3NF, and explain why functional dependencies matter?", "Technical", "DB Normalization"),
-            ("In algorithmic problem solving, how do you approach finding two numbers in an array that add up to a target sum in O(n) time complexity?", "Problem Solving", "Array Algorithms"),
-            (f"In your project '{p.projects[0].title if p.projects else 'development work'}', what testing strategies (unit tests, integration tests) did you implement to verify reliability?", "Technical", "Testing & QA"),
-            ("Describe a situation where you had to learn a completely new framework or library under a tight university or project deadline. What was your learning methodology?", "Behavioral", "Learning Agility"),
-            ("Explain the concept of multithreading and race conditions, and how mutexes or semaphores prevent concurrent data corruption.", "Technical", "Concurrency & Threads")
-        ]
-        q_text, cat, top = infosys_bank[turns_count % len(infosys_bank)]
-    elif target_company == "Accenture":
-        accenture_bank = [
-            ("In cloud computing, what are the architectural distinctions between IaaS, PaaS, and Serverless, and how do microservices communicate via REST or message queues?", "Technical", "Cloud & Microservices"),
-            (f"Looking at your experience with {p.programming_languages[0] if p.programming_languages else 'modern stacks'}, how do you structure API security with tokens (JWT) and HTTPS encryption?", "Technical", "API Security"),
-            ("In Agile development, how do you participate in daily standups and sprint retrospectives, and how do you handle a situation where a dependency blocks your deliverable?", "Behavioral", "Agile Collaboration"),
-            ("Describe a technical challenge from your resume where you had to explain a complex engineering issue to a non-technical peer or stakeholder.", "Behavioral", "Client Communication"),
-            ("What is continuous integration and continuous deployment (CI/CD), and how do automated pipelines improve release reliability?", "Technical", "CI/CD & DevOps")
-        ]
-        q_text, cat, top = accenture_bank[turns_count % len(accenture_bank)]
-    elif target_company == "Startup":
-        startup_bank = [
-            ("In an early-stage startup, speed of shipping is critical. In your projects, how do you decide when to take on technical debt versus when to invest in scalable architecture?", "Technical", "Pragmatic Architecture"),
-            (f"In your project '{p.projects[0].title if p.projects else 'web application'}', walk me through your end-to-end debugging workflow when an API returns an intermittent 500 internal server error.", "Problem Solving", "Production Debugging"),
-            ("Tell me about a time when a project requirement or specification changed completely midway through development. How did you pivot your implementation?", "Behavioral", "Handling Ambiguity"),
-            ("If our application suddenly experienced a 10x traffic spike tomorrow, what is the single biggest bottleneck in your current architecture that would fail first, and how would you fix it?", "System Design", "Scalability Bottlenecks"),
-            ("How do you approach database migrations and schema updates without causing downtime or breaking active client sessions?", "Technical", "Zero-Downtime Migrations")
-        ]
-        q_text, cat, top = startup_bank[turns_count % len(startup_bank)]
-    else:
-        general_bank = [
-            (f"You listed {p.frameworks[0] if p.frameworks else 'modern frameworks'} on your resume. What architectural patterns do you rely on to manage state and maintain clean separation of concerns?", "Technical", "Architecture"),
-            (f"In your project '{p.projects[0].title if p.projects else 'backend system'}', how did you approach database schema design, indexing, and preventing query bottlenecks?", "System Design", "Database & Performance"),
-            ("Tell me about a time when you encountered a subtle or critical bug in production or during testing. What was your debugging methodology to pinpoint the root cause?", "Problem Solving", "Debugging Methodology"),
-            ("When collaborating on a team with conflicting technical opinions on architecture or tooling, how do you navigate the discussion to reach consensus?", "Behavioral", "Team Consensus"),
-            ("If you had to design a rate-limiting service capable of handling millions of requests per second, what data structures and caching mechanisms would you employ?", "System Design", "Distributed Rate Limiting")
-        ]
-        q_text, cat, top = general_bank[turns_count % len(general_bank)]
-
-    return QuestionItem(
-        id=next_id,
-        question=q_text,
-        category=cat,
-        topic=top,
-        difficulty=session.difficulty,
-        is_follow_up=False,
-        target_skill_or_project=top,
-        context_hint=f"{target_company} round question",
-        round_name=round_label
-    )
 

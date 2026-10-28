@@ -64,15 +64,20 @@ export default function Navbar({
           {/* Groq LLM Status indicator */}
           <button
             onClick={onOpenApiKeyModal}
-            className="flex items-center space-x-2 px-3 py-1.5 rounded-lg text-xs font-medium bg-slate-900 border border-slate-800 hover:border-slate-700 hover:bg-slate-800/60 transition-all text-slate-300"
-            title="Configure Groq API Key"
+            className={`flex items-center space-x-2 px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all shadow-sm ${
+              groqConnected
+                ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300 hover:bg-emerald-500/20'
+                : 'bg-amber-500/15 border-amber-500/50 text-amber-300 hover:bg-amber-500/25 animate-pulse'
+            }`}
+            title={groqConnected ? "Groq API Connected" : "Groq API Key Required for Real Interview AI"}
           >
-            <span className={`w-2 h-2 rounded-full ${groqConnected ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'}`} />
-            <span className="hidden md:inline">
-              {groqConnected ? 'Groq Llama-3.3 Active' : 'Configure Groq Key'}
+            <span className={`w-2 h-2 rounded-full ${groqConnected ? 'bg-emerald-400' : 'bg-amber-400'}`} />
+            <span>
+              {groqConnected ? 'Groq Llama-3.3 Active' : 'Enter Groq API Key (Required)'}
             </span>
-            <Key className="w-3.5 h-3.5 text-slate-400 ml-1" />
+            <Key className="w-3.5 h-3.5 ml-0.5 opacity-80" />
           </button>
+
 
           {/* Reset / New Session */}
           {currentStep !== 'landing' && (

@@ -3,7 +3,7 @@ import { Upload, FileText, CheckCircle2, AlertCircle, ArrowRight, Sparkles, X, U
 import { uploadResumePdf, analyzeResumeText } from '../services/api';
 import { SAMPLE_RESUMES } from '../data/sampleResumes';
 
-export default function ResumeUploadPage({ onResumeParsed }) {
+export default function ResumeUploadPage({ onResumeParsed, groqConnected, onOpenApiKeyModal }) {
   const [file, setFile] = useState(null);
   const [isDragging, setIsDragging] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -54,6 +54,12 @@ export default function ResumeUploadPage({ onResumeParsed }) {
   };
 
   const handleProcessResume = async () => {
+    if (!groqConnected) {
+      setError('Groq API Key Required: Prepwise requires an active Groq API key to analyze your resume with real AI. Please enter your key to proceed.');
+      if (onOpenApiKeyModal) onOpenApiKeyModal();
+      return;
+    }
+
     if (!file && !selectedSample) {
       setError('Please upload a PDF resume or select a sample profile to continue.');
       return;
@@ -93,6 +99,9 @@ export default function ResumeUploadPage({ onResumeParsed }) {
       setLoadingStage(0);
       const detail = err.response?.data?.detail || 'Failed to process resume. Please ensure the PDF has readable text or try a sample resume.';
       setError(detail);
+      if (err.response?.status === 403 && onOpenApiKeyModal) {
+        onOpenApiKeyModal();
+      }
     }
   };
 
@@ -108,6 +117,31 @@ export default function ResumeUploadPage({ onResumeParsed }) {
           Upload your resume in PDF format. Prepwise uses this to build a customized interview questioning strategy for your exact projects.
         </p>
       </div>
+
+      {/* Groq API Key Required Banner if disconnected */}
+      {!groqConnected && (
+        <div className="mb-8 p-4 sm:p-5 rounded-2xl bg-amber-500/10 border border-amber-500/30 flex flex-col sm:flex-row items-center justify-between gap-4 text-amber-200">
+          <div className="flex items-center space-x-3 text-left">
+            <div className="w-10 h-10 rounded-xl bg-amber-500/20 flex items-center justify-center flex-shrink-0">
+              <AlertCircle className="w-5 h-5 text-amber-400" />
+            </div>
+            <div>
+              <p className="text-sm font-bold text-amber-300 font-['Outfit']">Groq API Key Required for Real AI</p>
+              <p className="text-xs text-amber-200/80 leading-relaxed mt-0.5">
+                Prepwise runs real Groq Llama-3.3-70b inference to deeply extract your actual skills and projects. Please enter your API key to proceed.
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={onOpenApiKeyModal}
+            className="w-full sm:w-auto px-4 py-2.5 rounded-xl bg-gradient-to-r from-amber-500 to-amber-400 hover:from-amber-400 hover:to-amber-300 text-slate-950 font-bold text-xs whitespace-nowrap shadow-lg shadow-amber-500/20 transition-all flex items-center justify-center space-x-1.5"
+          >
+            <Sparkles className="w-3.5 h-3.5" />
+            <span>Enter Groq Key</span>
+          </button>
+        </div>
+      )}
+
 
       {/* Main Upload Box */}
       <div className="glass-panel rounded-3xl p-6 sm:p-8 border border-slate-800 shadow-2xl mb-8">

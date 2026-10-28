@@ -23,6 +23,7 @@ try:
     )
     from backend.services.evaluation_service import evaluate_answer, generate_final_report
     from backend.api.session_store import sessions_db, reports_db, get_history_list, HISTORY_FILE
+    from backend.services.groq_service import groq_service
 except ImportError:
     from models.schemas import (
         InterviewCreateRequest,
@@ -44,6 +45,7 @@ except ImportError:
     )
     from services.evaluation_service import evaluate_answer, generate_final_report
     from api.session_store import sessions_db, reports_db, get_history_list, HISTORY_FILE
+    from services.groq_service import groq_service
 
 logger = logging.getLogger(__name__)
 
@@ -62,15 +64,27 @@ async def get_single_company_plan(company_name: str = Path(...)):
 @router.post("/create", response_model=NextQuestionResponse)
 async def create_interview(payload: InterviewCreateRequest):
     """Create a new mock interview session and return the first question."""
+    if not groq_service.is_configured():
+        raise HTTPException(
+            status_code=403,
+            detail="Groq API Key Required: An active Groq API key is required to generate interview questions. Please provide your key in the top bar or settings."
+        )
+
     session_id = str(uuid.uuid4())
     target_company = payload.target_company or "General"
     
-    first_question = generate_first_question(
-        profile=payload.candidate_profile,
-        interview_type=payload.interview_type,
-        difficulty=payload.difficulty,
-        target_company=target_company
-    )
+    try:
+        first_question = generate_first_question(
+            profile=payload.candidate_profile,
+            interview_type=payload.interview_type,
+            difficulty=payload.difficulty,
+            target_company=target_company
+        )
+    except ValueError as ve:
+        raise HTTPException(status_code=400, detail=str(ve))
+    except Exception as e:
+        logger.error(f"Error creating interview session: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to generate opening question: {str(e)}")
     
     session_state = InterviewSessionState(
         session_id=session_id,
@@ -109,6 +123,12 @@ async def get_interview_status(session_id: str = Path(...)):
 @router.post("/{session_id}/answer", response_model=NextQuestionResponse)
 async def submit_answer(session_id: str, payload: AnswerSubmitRequest):
     """Submit candidate's answer for the current question and get the next question or completion signal."""
+    if not groq_service.is_configured():
+        raise HTTPException(
+            status_code=403,
+            detail="Groq API Key Required: An active Groq API key is required to evaluate answers and generate follow-up questions."
+        )
+
     session = sessions_db.get(session_id)
     if not session:
         raise HTTPException(status_code=404, detail="Interview session not found or expired.")
@@ -123,23 +143,33 @@ async def submit_answer(session_id: str, payload: AnswerSubmitRequest):
     current_turn.answer = payload.answer_text.strip()
     
     # Internal evaluation with communication metrics
-    evaluation = evaluate_answer(
-        question=current_turn.question,
-        answer_text=payload.answer_text,
-        profile=session.candidate_profile,
-        difficulty=session.difficulty,
-        is_retry=payload.is_retry,
-        previous_communication_score=payload.previous_score
-    )
+    try:
+        evaluation = evaluate_answer(
+            question=current_turn.question,
+            answer_text=payload.answer_text,
+            profile=session.candidate_profile,
+            difficulty=session.difficulty,
+            is_retry=payload.is_retry,
+            previous_communication_score=payload.previous_score
+        )
+    except ValueError as ve:
+        raise HTTPException(status_code=400, detail=str(ve))
+    except Exception as e:
+        logger.error(f"Error evaluating answer: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to evaluate answer: {str(e)}")
+
     current_turn.evaluation = evaluation
 
     # Check if target total questions reached
     if len(session.turns) >= session.total_questions:
         session.status = "completed"
         # Pre-generate final report
-        report = generate_final_report(session)
-        reports_db[session_id] = report
-        
+        try:
+            report = generate_final_report(session)
+            reports_db[session_id] = report
+        except Exception as e:
+            logger.error(f"Error generating final report: {e}")
+
         return NextQuestionResponse(
             session_id=session_id,
             current_question_index=session.current_question_index,
@@ -151,7 +181,14 @@ async def submit_answer(session_id: str, payload: AnswerSubmitRequest):
         )
 
     # Generate next adaptive question
-    next_question = generate_next_question(session, latest_evaluation=evaluation)
+    try:
+        next_question = generate_next_question(session, latest_evaluation=evaluation)
+    except ValueError as ve:
+        raise HTTPException(status_code=400, detail=str(ve))
+    except Exception as e:
+        logger.error(f"Error generating next question: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to generate next question: {str(e)}")
+
     session.current_question_index += 1
     session.current_question = next_question
     session.turns.append(TurnRecord(question=next_question))
@@ -167,6 +204,7 @@ async def submit_answer(session_id: str, payload: AnswerSubmitRequest):
         previous_evaluation=evaluation,
         message="Answer received. Next question ready."
     )
+
 
 @router.post("/{session_id}/retry-answer", response_model=RetryAnswerResponse)
 async def retry_answer(session_id: str, payload: RetryAnswerRequest):

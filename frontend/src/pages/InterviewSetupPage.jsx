@@ -115,7 +115,9 @@ export default function InterviewSetupPage({
   candidateProfile,
   rawResumeText,
   onInterviewStarted,
-  onBackToUpload
+  onBackToUpload,
+  groqConnected,
+  onOpenApiKeyModal
 }) {
   const [targetCompany, setTargetCompany] = useState('TCS');
   const [interviewType, setInterviewType] = useState('Mixed');
@@ -131,6 +133,12 @@ export default function InterviewSetupPage({
   }, []);
 
   const handleStartInterview = async () => {
+    if (!groqConnected) {
+      setError('Groq API Key Required: An active Groq API key is required to start a real AI mock interview. Please configure your key.');
+      if (onOpenApiKeyModal) onOpenApiKeyModal();
+      return;
+    }
+
     setLoading(true);
     setError('');
 
@@ -148,9 +156,14 @@ export default function InterviewSetupPage({
       onInterviewStarted(response, payload);
     } catch (err) {
       setLoading(false);
-      setError(err.response?.data?.detail || 'Failed to start interview session. Please try again.');
+      const detail = err.response?.data?.detail || 'Failed to start interview session. Please try again.';
+      setError(detail);
+      if (err.response?.status === 403 && onOpenApiKeyModal) {
+        onOpenApiKeyModal();
+      }
     }
   };
+
 
   const currentPlan = COMPANY_PREPARATION_PLANS[targetCompany] || COMPANY_PREPARATION_PLANS.General;
 

@@ -54,13 +54,13 @@ export default function ApiKeyModal({ isOpen, onClose, onKeyUpdated, currentStat
             <Key className="w-5 h-5 text-brand-400" />
           </div>
           <div>
-            <h3 className="text-lg font-bold text-white font-['Outfit']">Groq API Key</h3>
-            <p className="text-xs text-slate-400">Power hyper-fast Llama-3.3-70b interview inference</p>
+            <h3 className="text-lg font-bold text-white font-['Outfit']">Groq API Key Required</h3>
+            <p className="text-xs text-slate-400">Power genuine Llama-3.3-70b interview intelligence</p>
           </div>
         </div>
 
         <p className="text-xs text-slate-300 mb-4 leading-relaxed">
-          Prepwise uses Groq’s ultra-low latency Llama-3 models to conduct realistic voice interviews in real-time.
+          Prepwise uses Groq’s high-throughput Llama-3 models to perform real-time resume extraction, adaptive question generation, and rigorous technical evaluations.
         </p>
 
         <form onSubmit={handleSubmit} className="space-y-4">
@@ -78,16 +78,16 @@ export default function ApiKeyModal({ isOpen, onClose, onKeyUpdated, currentStat
           </div>
 
           {error && (
-            <div className="flex items-center space-x-2 text-xs text-rose-400 bg-rose-500/10 border border-rose-500/20 p-2.5 rounded-xl">
-              <AlertCircle className="w-4 h-4 flex-shrink-0" />
-              <span>{error}</span>
+            <div className="flex items-start space-x-2 text-xs text-rose-400 bg-rose-500/10 border border-rose-500/20 p-2.5 rounded-xl">
+              <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
+              <span className="leading-relaxed">{error}</span>
             </div>
           )}
 
           {success && (
             <div className="flex items-center space-x-2 text-xs text-emerald-400 bg-emerald-500/10 border border-emerald-500/20 p-2.5 rounded-xl">
               <CheckCircle className="w-4 h-4 flex-shrink-0" />
-              <span>Groq API Key activated successfully!</span>
+              <span>Groq API Key verified & activated successfully!</span>
             </div>
           )}
 
@@ -116,17 +116,18 @@ export default function ApiKeyModal({ isOpen, onClose, onKeyUpdated, currentStat
                 className="px-4 py-2 text-xs font-semibold text-white bg-brand-600 hover:bg-brand-500 disabled:opacity-50 rounded-xl shadow-lg shadow-brand-600/30 transition-all flex items-center space-x-1.5"
               >
                 {loading ? (
-                  <span>Connecting...</span>
+                  <span>Verifying with Groq...</span>
                 ) : (
                   <>
                     <Sparkles className="w-3.5 h-3.5" />
-                    <span>Save Key</span>
+                    <span>Verify & Save</span>
                   </>
                 )}
               </button>
             </div>
           </div>
         </form>
+
 
       </div>
     </div>

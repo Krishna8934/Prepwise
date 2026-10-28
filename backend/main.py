@@ -1,6 +1,6 @@
 import os
 import logging
-from fastapi import FastAPI, HTTPException, Body
+from fastapi import FastAPI, HTTPException, Body, Request
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 
@@ -50,10 +50,21 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+@app.middleware("http")
+async def extract_groq_key_from_header(request: Request, call_next):
+    header_key = request.headers.get("x-groq-api-key", "").strip()
+    if header_key and header_key != groq_service.api_key:
+        try:
+            groq_service.validate_and_set_api_key(header_key, persist_to_env=True)
+        except Exception as e:
+            logger.warning(f"Could not auto-activate Groq key from request header: {e}")
+    return await call_next(request)
+
 # Register routers
 app.include_router(resume_router)
 app.include_router(interview_router)
 app.include_router(report_router)
+
 
 @app.get("/")
 async def root():
@@ -69,21 +80,26 @@ async def health_check():
     return {
         "status": "healthy",
         "groq_connected": groq_service.is_configured(),
-        "model": "llama-3.3-70b-versatile" if groq_service.is_configured() else "fallback-heuristic"
+        "model": groq_service.primary_model if groq_service.is_configured() else "disconnected"
     }
 
 @app.post("/api/config/groq-key")
 async def update_groq_key(payload: dict = Body(...)):
-    """Allow runtime configuration of Groq API Key."""
+    """Allow runtime configuration and verification of Groq API Key."""
     key = payload.get("api_key", "").strip()
     if not key:
         raise HTTPException(status_code=400, detail="API key cannot be empty.")
-    groq_service.set_api_key(key)
-    return {
-        "success": True,
-        "message": "Groq API key updated successfully.",
-        "groq_configured": groq_service.is_configured()
-    }
+    try:
+        result = groq_service.validate_and_set_api_key(key, persist_to_env=True)
+        return {
+            "success": True,
+            "message": result.get("message", "Groq API key updated successfully."),
+            "groq_configured": True,
+            "model": result.get("model")
+        }
+    except Exception as e:
+        logger.error(f"Failed to update Groq API key: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
 
 if __name__ == "__main__":
     import uvicorn

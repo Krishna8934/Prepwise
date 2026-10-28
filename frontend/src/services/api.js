@@ -10,6 +10,26 @@ const api = axios.create({
   timeout: 45000,
 });
 
+export const getStoredGroqKey = () => {
+  return localStorage.getItem('prepwise_groq_api_key') || import.meta.env.VITE_GROQ_API_KEY || '';
+};
+
+export const setStoredGroqKey = (key) => {
+  if (key) {
+    localStorage.setItem('prepwise_groq_api_key', key.trim());
+  } else {
+    localStorage.removeItem('prepwise_groq_api_key');
+  }
+};
+
+api.interceptors.request.use((config) => {
+  const storedKey = getStoredGroqKey();
+  if (storedKey) {
+    config.headers['X-Groq-Api-Key'] = storedKey;
+  }
+  return config;
+});
+
 export const checkHealth = async () => {
   try {
     const res = await api.get('/api/health');
@@ -20,9 +40,16 @@ export const checkHealth = async () => {
 };
 
 export const updateGroqKey = async (apiKey) => {
-  const res = await api.post('/api/config/groq-key', { api_key: apiKey });
+  const cleaned = (apiKey || '').trim();
+  const res = await api.post('/api/config/groq-key', { api_key: cleaned }, {
+    headers: { 'X-Groq-Api-Key': cleaned }
+  });
+  if (res.data?.success) {
+    setStoredGroqKey(cleaned);
+  }
   return res.data;
 };
+
 
 export const uploadResumePdf = async (file) => {
   const formData = new FormData();
